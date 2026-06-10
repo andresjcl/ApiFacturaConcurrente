@@ -29,10 +29,15 @@ public class AuthController : ControllerBase
             .FirstOrDefaultAsync(e => e.EmpresaId == request.Username && e.Activo);
 
         if (empresa == null)
+        {
             return Unauthorized(new { error = "Usuario inválido" });
+        }
 
+        // Verificar contraseña con BCrypt
         if (!BCrypt.Net.BCrypt.Verify(request.Password, empresa.EmpresaSecret))
+        {
             return Unauthorized(new { error = "Contraseña incorrecta" });
+        }
 
         var sucursales = await _context.ApiEmpresaSucursales
             .Where(s => s.EmpresaId == empresa.EmpresaId && s.Activo)
@@ -51,6 +56,15 @@ public class AuthController : ControllerBase
         });
     }
 
+    // Endpoint temporal para generar hash (después lo eliminas)
+    //[HttpGet("generar-hash")]
+    //public IActionResult GenerarHash()
+    //{
+    //    string password = "123456";
+    //    string hash = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 11);
+    //    return Ok(new { password, hash });
+    //}
+
     private string GenerarToken(string empresaId, List<string> sucursales)
     {
         var claims = new List<Claim>
@@ -60,9 +74,17 @@ public class AuthController : ControllerBase
         };
 
         foreach (var suc in sucursales)
+        {
             claims.Add(new Claim("sucursal", suc));
+        }
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]));
+        var jwtKey = _configuration["Jwt:Key"];
+        if (string.IsNullOrEmpty(jwtKey))
+        {
+            throw new InvalidOperationException("JWT Key no está configurada");
+        }
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(

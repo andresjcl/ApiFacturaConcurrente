@@ -4,60 +4,82 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using ApiFacturaConcurrente.Data;
 using ApiFacturaConcurrente.Services;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configurar límites para alta concurrencia
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.Limits.MaxConcurrentConnections = 200;
-    options.Limits.MaxConcurrentUpgradedConnections = 200;
-});
-
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();  // Ahora funciona
 
-// DbContext para MasterDB
+
+// Configuración de Swagger con Authorize
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo { Title = "ApiFacturaConcurrente", Version = "v1" });
+
+    // Definir esquema de seguridad Bearer
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Ingrese el token JWT con el formato: Bearer {token}"
+    });
+
+    // Requerir el token para todos los endpoints
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new string[] {}
+        }
+    });
+});
+
 builder.Services.AddDbContext<MasterDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("MasterDB")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("MasterConexiones")));
 
-// Servicios
 builder.Services.AddScoped<FacturaService>();
 
-// Configurar JWT
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "MiClaveSuperSecretaDe32Caracteres1234567890";
-var keyBytes = Encoding.ASCII.GetBytes(jwtKey);
+var keyBytes = Encoding.UTF8.GetBytes(jwtKey);
 
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-})
-.AddJwtBearer(options =>
-{
-    options.RequireHttpsMetadata = false;
-    options.SaveToken = true;
-    options.TokenValidationParameters = new TokenValidationParameters
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
     {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
-        ValidateIssuer = false,
-        ValidateAudience = false,
-        ValidateLifetime = true,
-        ClockSkew = TimeSpan.Zero
-    };
-});
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        };
+    });
+
+
+builder.Services.AddScoped<ConsultaService>();
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();      
-    app.UseSwaggerUI();    
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "ApiFacturaConcurrente v1");
+});
 
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+
 app.Run();
