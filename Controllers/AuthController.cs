@@ -6,6 +6,7 @@ using System.Text;
 using Microsoft.IdentityModel.Tokens;
 using ApiFacturaConcurrente.Data;
 using ApiFacturaConcurrente.Models.DTOs;
+using System.Security.Cryptography;
 
 namespace ApiFacturaConcurrente.Controllers;
 
@@ -22,32 +23,39 @@ public class AuthController : ControllerBase
         _configuration = configuration;
     }
 
-    [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginRequestDto request)
+    /// <summary>
+    /// Autenticación con ClientId y ClientSecret
+    /// </summary>
+    [HttpPost("token")]
+    public async Task<IActionResult> GetToken([FromBody] TokenRequestDto request)
     {
+        // Validar ClientId y ClientSecret
         var empresa = await _context.ApiEmpresas
-            .FirstOrDefaultAsync(e => e.EmpresaId == request.Username && e.Activo);
+            .FirstOrDefaultAsync(e => e.ClientId == request.ClientId && e.Activo);
 
         if (empresa == null)
-        {
-            return Unauthorized(new { error = "Usuario inválido" });
-        }
+            return Unauthorized(new { error = "ClientId inválido" });
 
-        // Verificar contraseña con BCrypt
-        if (!BCrypt.Net.BCrypt.Verify(request.Password, empresa.EmpresaSecret))
-        {
-            return Unauthorized(new { error = "Contraseña incorrecta" });
-        }
+        // Validar ClientSecret (comparación segura)
+        if (!VerifyClientSecret(request.ClientSecret, empresa.ClientSecret))
+            return Unauthorized(new { error = "ClientSecret inválido" });
 
+        // Obtener sucursales permitidas
         var sucursales = await _context.ApiEmpresaSucursales
             .Where(s => s.EmpresaId == empresa.EmpresaId && s.Activo)
             .Select(s => s.SucursalCodigo)
             .ToListAsync();
 
+        // Generar token JWT
         var token = GenerarToken(empresa.EmpresaId, sucursales);
         var expiresIn = _configuration.GetValue<int>("Jwt:ExpiresInMinutes") * 60;
 
-        return Ok(new LoginResponseDto
+        // Guardar token en BD
+        empresa.TokenActual = token;
+        empresa.TokenExpiracion = DateTime.Now.AddMinutes(_configuration.GetValue<int>("Jwt:ExpiresInMinutes"));
+        await _context.SaveChangesAsync();
+
+        return Ok(new TokenResponseDto
         {
             AccessToken = token,
             ExpiresIn = expiresIn,
@@ -56,21 +64,24 @@ public class AuthController : ControllerBase
         });
     }
 
-    // Endpoint temporal para generar hash (después lo eliminas)
-    //[HttpGet("generar-hash")]
-    //public IActionResult GenerarHash()
-    //{
-    //    string password = "123456";
-    //    string hash = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 11);
-    //    return Ok(new { password, hash });
-    //}
+    private bool VerifyClientSecret(string inputSecret, string? storedSecret)
+    {
+        if (string.IsNullOrEmpty(storedSecret))
+            return false;
+
+        // Comparación de strings segura (tiempo constante)
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(inputSecret),
+            Encoding.UTF8.GetBytes(storedSecret));
+    }
 
     private string GenerarToken(string empresaId, List<string> sucursales)
     {
         var claims = new List<Claim>
         {
             new Claim(ClaimTypes.Name, empresaId),
-            new Claim("sub", empresaId)
+            new Claim("sub", empresaId),
+            new Claim("clientId", empresaId)
         };
 
         foreach (var suc in sucursales)
@@ -81,7 +92,7 @@ public class AuthController : ControllerBase
         var jwtKey = _configuration["Jwt:Key"];
         if (string.IsNullOrEmpty(jwtKey))
         {
-            throw new InvalidOperationException("JWT Key no está configurada");
+            jwtKey = "qwertyuiop`+asdfghjklñ´zxcvbnm123456789012347qazxswcdevfrbgtnhymjuZAQWSXCDERFV";
         }
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
