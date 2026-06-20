@@ -25,7 +25,12 @@ public class FacturaService
     public async Task<FacturaResponseDto> CrearFactura(SucursalServidor sucursalConfig, FacturaRequestDto request, string empresaId)
     {
         var response = new FacturaResponseDto { Success = false };
-        var semaphore = _semaphores.GetOrAdd(sucursalConfig.SucursalCodigo, new SemaphoreSlim(1, 1));
+        var semaphore = _semaphores.GetOrAdd(sucursalConfig.SucursalCodigo, new SemaphoreSlim(5, 5));
+
+        if (!await semaphore.WaitAsync(TimeSpan.FromSeconds(30)))
+        {
+            throw new Exception("Tiempo de espera agotado. Intente nuevamente.");
+        }
 
         await semaphore.WaitAsync();
 

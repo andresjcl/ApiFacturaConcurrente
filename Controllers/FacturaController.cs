@@ -3,6 +3,7 @@ using ApiFacturaConcurrente.Models.DTOs;
 using ApiFacturaConcurrente.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
@@ -27,6 +28,7 @@ public class FacturaController : ControllerBase
     }
 
     [HttpPost("emitir")]
+    [EnableRateLimiting("FacturaLimit")]
     public async Task<IActionResult> EmitirFactura([FromBody] FacturaRequestDto request)
     {
         var empresaId = User.FindFirst(ClaimTypes.Name)?.Value;
