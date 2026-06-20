@@ -1,10 +1,12 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
-using ApiFacturaConcurrente.Data;
+﻿using ApiFacturaConcurrente.Data;
 using ApiFacturaConcurrente.Models.DTOs;
 using ApiFacturaConcurrente.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace ApiFacturaConcurrente.Controllers;
 
@@ -15,11 +17,13 @@ public class FacturaController : ControllerBase
 {
     private readonly MasterDbContext _context;
     private readonly FacturaService _facturaService;
+    private readonly ImpresionService _impresionService;
 
-    public FacturaController(MasterDbContext context, FacturaService facturaService)
+    public FacturaController(MasterDbContext context, FacturaService facturaService, ImpresionService impresionService)
     {
         _context = context;
         _facturaService = facturaService;
+        _impresionService = impresionService;
     }
 
     [HttpPost("emitir")]
@@ -70,4 +74,49 @@ public class FacturaController : ControllerBase
 
         return Ok(resultado);
     }
+
+    
+    // ==================== TEST IMPRESIÓN ====================
+    //[HttpGet("test-imprimir")]
+    //public async Task<IActionResult> TestImprimir(string sucursal = "AV6", decimal docNumero = 1)
+    //{
+    //    try
+    //    {
+    //        // Verificar que _impresionService no es null
+    //        if (_impresionService == null)
+    //        {
+    //            return StatusCode(500, new { error = "ImpresionService no está inicializado" });
+    //        }
+
+    //        var sucursalConfig = await _context.SucursalesServidores
+    //            .FirstOrDefaultAsync(s => s.SucursalCodigo == sucursal && s.Activo);
+
+    //        if (sucursalConfig == null)
+    //            return BadRequest($"No hay configuración para sucursal {sucursal}");
+
+    //        using var connection = new SqlConnection(sucursalConfig.ConnectionString);
+    //        await connection.OpenAsync();
+
+    //        var (cabecera, lineas, empresa) = await _facturaService.ConsultarFacturaParaImprimirTest(connection, sucursal, docNumero);
+
+    //        if (cabecera == null)
+    //            return NotFound($"No se encontró factura {docNumero} en sucursal {sucursal}");
+
+    //        var resultado = await _impresionService.ImprimirFactura(sucursal, cabecera, lineas, empresa);
+
+    //        return Ok(new
+    //        {
+    //            success = resultado,
+    //            sucursal,
+    //            docNumero,
+    //            mensaje = resultado ? "Factura impresa correctamente" : "Error al imprimir"
+    //        });
+    //    }
+    //    catch (Exception ex)
+    //    {
+    //        return StatusCode(500, new { error = ex.Message, stackTrace = ex.StackTrace });
+    //    }
+    //}
+
+
 }

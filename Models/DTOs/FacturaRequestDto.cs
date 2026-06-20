@@ -21,35 +21,30 @@ public class FacturaRequestDto
     public DateTime Fecha { get; set; }
     public string? Detalle { get; set; }
 
-    // ==================== TOTALES (YA CALCULADOS) ====================
+    // ==================== TOTALES ====================
     public decimal PorcenIva { get; set; }
     public decimal ValorIva { get; set; }
     public decimal TotCiva { get; set; }
     public decimal TotSiva { get; set; }
     public decimal ValorTotal { get; set; }
 
-    // ==================== DESCUENTOS ====================
+    // ==================== DESCUENTOS GENERALES ====================
     public decimal DescuentoPorcentaje { get; set; }
     public decimal DescuentoValor { get; set; }
     public string? DescuentoMotivo { get; set; }
 
     // ==================== AGREGADORES DE PEDIDO ====================
-    public List<AgregadorDto> AgregadoresPedido { get; set; } = new();
+    public List<AgregadorPedidoDto> AgregadoresPedido { get; set; } = new();
 
-    // ==================== PRODUCTOS ====================
-    public List<FacturaLineaDto> Lineas { get; set; } = new();
+    // ==================== LÍNEAS DE PRODUCTOS ====================
+    public List<FacturaLineaSimpleDto> Lineas { get; set; } = new();
 
     // ==================== PAGOS ====================
     public List<FacturaPagoDto> Pagos { get; set; } = new();
-
-    // ==================== CLIENTE IDENTIFICACIÓN (para crear/validar) ====================
-    public ClienteIdentificacionDto? ClienteIdentificacion { get; set; }
 }
 
-// ==================== AGREGADOR ====================
-public class AgregadorDto
+public class AgregadorPedidoDto
 {
-    public int NumLinea { get; set; }
     public string Codigo { get; set; } = string.Empty;
     public string Nombre { get; set; } = string.Empty;
     public int Cantidad { get; set; } = 1;
@@ -61,4 +56,39 @@ public class AgregadorDto
     public bool AfectaBaseImponible { get; set; } = true;
 }
 
+public class FacturaLineaSimpleDto
+{
+    public int NumLinea { get; set; }
+    public string Codigo { get; set; } = string.Empty;
+    public string? Nombre { get; set; }
+    public decimal Cantidad { get; set; }
+    public decimal PrecioUnitario { get; set; }
+    public decimal Subtotal { get; set; }
+    public decimal PrecioTotal { get; set; }
+    public decimal Iva { get; set; }
+    public decimal ValorIva { get; set; }
+    public decimal DescuentoPorcentaje { get; set; }
+    public decimal DescuentoValor { get; set; }
+    public string? DescuentoMotivo { get; set; }
+    public List<string> ModificadoresTexto { get; set; } = new();
+    public List<AgregadorProductoDto> AgregadoresProducto { get; set; } = new();
+}
 
+public class AgregadorProductoDto
+{
+    public string Codigo { get; set; } = string.Empty;
+    public string Nombre { get; set; } = string.Empty;
+    public int Cantidad { get; set; } = 1;
+    public decimal PrecioUnitario { get; set; }
+    public decimal Subtotal { get; set; }
+    public decimal Iva { get; set; }
+    public decimal ValorIva { get; set; }
+    public decimal Total { get; set; }
+    public List<string> ModificadoresTexto { get; set; } = new();
+}
+
+public class FacturaPagoDto
+{    
+    public string? IdPago { get; set; }
+    public string? Descripcion { get; set; }
+}

@@ -15,4 +15,7 @@ public class MasterDbContext : DbContext
     public DbSet<ApiEmpresaSucursal> ApiEmpresaSucursales { get; set; }
     public DbSet<SucursalConfig> SucursalesConfig { get; set; }
     public DbSet<PorcentajeIva> PorcentajeIva { get; set; }
+
+    public DbSet<SucursalImpresora> SucursalesImpresoras { get; set; }
+    public DbSet<Identificacion> Identificacion { get; set; }
 }

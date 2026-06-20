@@ -15,11 +15,13 @@ public class ConsultaController : ControllerBase
 {
     private readonly MasterDbContext _context;
     private readonly ConsultaService _consultaService;
+    private readonly FacturaService _facturaService;
 
-    public ConsultaController(MasterDbContext context, ConsultaService consultaService)
+    public ConsultaController(MasterDbContext context, ConsultaService consultaService, FacturaService facturaService)
     {
         _context = context;
         _consultaService = consultaService;
+        _facturaService = facturaService;
     }
 
 
@@ -69,119 +71,43 @@ public class ConsultaController : ControllerBase
     }
 
 
+    [HttpGet("iva-actual")]
+    public async Task<IActionResult> GetIvaActual([FromQuery] string sucursal)
+    {
+        try
+        {
+            var empresaId = User.FindFirst(ClaimTypes.Name)?.Value;
+            if (string.IsNullOrEmpty(empresaId))
+                return Unauthorized(new { error = "Token inválido" });
 
+            var sucursalPermitida = await _context.ApiEmpresaSucursales
+                .AnyAsync(s => s.EmpresaId == empresaId && s.SucursalCodigo == sucursal && s.Activo);
 
-    /// <summary>
-    /// Obtiene las facturas de una sucursal
-    /// </summary>
-    //[HttpGet("facturas")]
-    //public async Task<IActionResult> GetFacturas([FromQuery] string sucursal,[FromQuery] DateTime? desde = null,[FromQuery] DateTime? hasta = null,[FromQuery] int limite = 100)
-    //{
-    //    var empresaId = User.FindFirst(ClaimTypes.Name)?.Value;
-    //    if (string.IsNullOrEmpty(empresaId))
-    //        return Unauthorized(new { error = "Token inválido" });
+            if (!sucursalPermitida)
+                return BadRequest(new { error = $"Sucursal {sucursal} no permitida" });
 
-    //    var sucursalPermitida = await _context.ApiEmpresaSucursales
-    //        .AnyAsync(s => s.EmpresaId == empresaId && s.SucursalCodigo == sucursal && s.Activo);
+            var sucursalConfig = await _context.SucursalesServidores
+                .FirstOrDefaultAsync(s => s.SucursalCodigo == sucursal && s.Activo);
 
-    //    if (!sucursalPermitida)
-    //        return BadRequest(new { error = $"Sucursal {sucursal} no permitida" });
+            if (sucursalConfig == null)
+                return BadRequest(new { error = $"No hay configuración para sucursal {sucursal}" });
 
-    //    var sucursalConfig = await _context.SucursalesServidores
-    //        .FirstOrDefaultAsync(s => s.SucursalCodigo == sucursal && s.Activo);
+            // Usar el método para obtener IVA con la configuración de la sucursal
+            var iva = await _facturaService.ObtenerPorcentajeIva(sucursalConfig, DateTime.Now);
 
-    //    if (sucursalConfig == null)
-    //        return BadRequest(new { error = $"No hay configuración para sucursal {sucursal}" });
+            return Ok(new
+            {
+                ivaPorcentaje = iva,
+                ivaDecimal = iva / 100,
+                fecha = DateTime.Now.ToString("yyyy-MM-dd"),
+                sucursal = sucursal,
+                empresaId = sucursalConfig.EmpresaId
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
 
-    //    var resultado = await _consultaService.GetFacturas(sucursalConfig, sucursal, desde, hasta, limite);
-
-    //    if (!resultado.success)
-    //        return StatusCode(500, new { success = false, mensaje = resultado.mensaje });
-
-    //    return Ok(new
-    //    {
-    //        success = true,
-    //        sucursal,
-    //        total = resultado.total,
-    //        limite,
-    //        desde = desde?.ToString("yyyy-MM-dd"),
-    //        hasta = hasta?.ToString("yyyy-MM-dd"),
-    //        data = resultado.data
-    //    });
-    //}
-
-    /// <summary>
-    /// Obtiene los clientes de una sucursal
-    ///// </summary>
-    //[HttpGet("clientes")]
-    //public async Task<IActionResult> GetClientes([FromQuery] string sucursal,[FromQuery] string? codigo = null,[FromQuery] string? nombre = null,[FromQuery] int limite = 100)
-    //{
-    //    var empresaId = User.FindFirst(ClaimTypes.Name)?.Value;
-    //    if (string.IsNullOrEmpty(empresaId))
-    //        return Unauthorized(new { error = "Token inválido" });
-
-    //    var sucursalPermitida = await _context.ApiEmpresaSucursales
-    //        .AnyAsync(s => s.EmpresaId == empresaId && s.SucursalCodigo == sucursal && s.Activo);
-
-    //    if (!sucursalPermitida)
-    //        return BadRequest(new { error = $"Sucursal {sucursal} no permitida" });
-
-    //    var sucursalConfig = await _context.SucursalesServidores
-    //        .FirstOrDefaultAsync(s => s.SucursalCodigo == sucursal && s.Activo);
-
-    //    if (sucursalConfig == null)
-    //        return BadRequest(new { error = $"No hay configuración para sucursal {sucursal}" });
-
-    //    var resultado = await _consultaService.GetClientes(sucursalConfig, codigo, nombre, limite);
-
-    //    if (!resultado.success)
-    //        return StatusCode(500, new { success = false, mensaje = resultado.mensaje });
-
-    //    return Ok(new
-    //    {
-    //        success = true,
-    //        sucursal,
-    //        total = resultado.total,
-    //        limite,
-    //        data = resultado.data
-    //    });
-    //}
-
-    ///// <summary>
-    ///// Obtiene las líneas de una factura específica
-    ///// </summary>
-    //[HttpGet("factura/{docNumero}")]
-    //public async Task<IActionResult> GetFacturaDetalle( [FromQuery] string sucursal,[FromQuery] decimal docNumero)
-    //{
-    //    var empresaId = User.FindFirst(ClaimTypes.Name)?.Value;
-    //    if (string.IsNullOrEmpty(empresaId))
-    //        return Unauthorized(new { error = "Token inválido" });
-
-    //    var sucursalPermitida = await _context.ApiEmpresaSucursales
-    //        .AnyAsync(s => s.EmpresaId == empresaId && s.SucursalCodigo == sucursal && s.Activo);
-
-    //    if (!sucursalPermitida)
-    //        return BadRequest(new { error = $"Sucursal {sucursal} no permitida" });
-
-    //    var sucursalConfig = await _context.SucursalesServidores
-    //        .FirstOrDefaultAsync(s => s.SucursalCodigo == sucursal && s.Activo);
-
-    //    if (sucursalConfig == null)
-    //        return BadRequest(new { error = $"No hay configuración para sucursal {sucursal}" });
-
-    //    var resultado = await _consultaService.GetFacturaDetalle(sucursalConfig, sucursal, docNumero);
-
-    //    if (!resultado.success)
-    //        return StatusCode(500, new { success = false, mensaje = resultado.mensaje });
-
-    //    return Ok(new
-    //    {
-    //        success = true,
-    //        sucursal,
-    //        docNumero,
-    //        cabecera = resultado.cabecera,
-    //        lineas = resultado.lineas,
-    //        totalLineas = resultado.totalLineas
-    //    });
-    //}
 }

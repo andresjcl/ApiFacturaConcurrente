@@ -69,6 +69,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 
 builder.Services.AddScoped<ConsultaService>();
+builder.Services.AddScoped<ImpresionService>();
+builder.Services.AddScoped<FacturaService>();
 
 var app = builder.Build();
 

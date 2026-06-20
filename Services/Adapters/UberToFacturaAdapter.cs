@@ -20,14 +20,14 @@ public class UberToFacturaAdapter
         string email = uberRequest.client.email?.ToString() ?? "";
         string direccion = uberRequest.client.billingInformation?.address?.ToString() ?? "";
 
-        // Construir líneas de productos
-        var lineas = new List<FacturaLineaDto>();
+        // Construir líneas de productos (usando FacturaLineaSimpleDto)
+        var lineas = new List<FacturaLineaSimpleDto>();
         int numLinea = 1;
 
         foreach (var product in uberRequest.order.products)
         {
             // Producto principal
-            lineas.Add(new FacturaLineaDto
+            lineas.Add(new FacturaLineaSimpleDto
             {
                 NumLinea = numLinea++,
                 Codigo = product.productId?.ToString() ?? "",
@@ -43,7 +43,7 @@ public class UberToFacturaAdapter
             });
         }
 
-        // Extraer formas de pago
+        // Extraer formas de pago (FacturaPagoDto sin TipoPago)
         var pagos = new List<FacturaPagoDto>();
         foreach (var payment in uberRequest.payments.paymentMethods)
         {
@@ -55,9 +55,7 @@ public class UberToFacturaAdapter
             };
 
             pagos.Add(new FacturaPagoDto
-            {
-                Valor = payment.totalBill ?? 0,
-                TipoPago = "4",
+            {                
                 Descripcion = uberRequest.account?.ToString() ?? "UBER EATS",
                 IdPago = idPago
             });
@@ -75,6 +73,7 @@ public class UberToFacturaAdapter
             PorcenIva = taxPercentage,
             ValorIva = taxValue,
             TotCiva = subtotal,
+            TotSiva = 0,
             ValorTotal = total,
             DescuentoPorcentaje = uberRequest.discountPercentage ?? 0,
             DescuentoMotivo = uberRequest.discountReason?.ToString(),
