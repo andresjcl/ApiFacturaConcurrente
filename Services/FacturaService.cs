@@ -73,23 +73,27 @@ public class FacturaService
 
             await transaction.CommitAsync();
 
-            // 6. IMPRIMIR
-            try
+            // ==================== IMPRIMIR (FIRE AND FORGET) ====================
+            // La impresión se ejecuta en background sin bloquear la respuesta
+            _ = Task.Run(async () =>
             {
-                var (cabecera, lineas, empresa) = await ConsultarFacturaParaImprimir(
-                    connection, idClaveDoc, request.Sucursal, "FAC", docNumero);
+                try
+                {
+                    var (cabecera, lineas, empresa) = await ConsultarFacturaParaImprimir(
+                        connection, idClaveDoc, request.Sucursal, "FAC", docNumero);
 
-                bool impreso = await _impresionService.ImprimirFactura(request.Sucursal, cabecera, lineas, empresa);
+                    bool impreso = await _impresionService.ImprimirFactura(request.Sucursal, cabecera, lineas, empresa);
 
-                if (impreso)
-                    Console.WriteLine($"✅ Factura {docNumero} impresa correctamente");
-                else
-                    Console.WriteLine($"⚠️ Factura {docNumero} NO se imprimió (deshabilitada o error)");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error al imprimir: {ex.Message}");
-            }
+                    if (impreso)
+                        Console.WriteLine($"✅ Factura {docNumero} impresa correctamente");
+                    else
+                        Console.WriteLine($"⚠️ Factura {docNumero} NO se imprimió");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error al imprimir: {ex.Message}");
+                }
+            });
 
             response.Success = true;
             response.Sucursal = request.Sucursal;
