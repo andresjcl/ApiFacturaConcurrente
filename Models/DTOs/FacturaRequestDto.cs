@@ -21,17 +21,20 @@ public class FacturaRequestDto
     public DateTime Fecha { get; set; }
     public string? Detalle { get; set; }
 
-    // ==================== TOTALES ====================
-    public decimal PorcenIva { get; set; }
-    public decimal ValorIva { get; set; }
-    public decimal TotCiva { get; set; }
-    public decimal TotSiva { get; set; }
-    public decimal ValorTotal { get; set; }
+    // ==================== TOTALES (OPCIONALES - EL SISTEMA LOS CALCULA) ====================
+    public decimal PorcenIva { get; set; }      // Si viene 0, el sistema lo obtiene de Ivaretdax
+    public decimal ValorIva { get; set; }       // Si viene 0, el sistema lo calcula
+    public decimal TotCiva { get; set; }        // Si viene 0, el sistema lo calcula
+    public decimal TotSiva { get; set; }        // Si viene 0, el sistema lo calcula
+    public decimal ValorTotal { get; set; }     // Si viene 0, el sistema lo calcula
 
     // ==================== DESCUENTOS GENERALES ====================
     public decimal DescuentoPorcentaje { get; set; }
     public decimal DescuentoValor { get; set; }
     public string? DescuentoMotivo { get; set; }
+
+    // ==================== INDICADOR DE PRECIO ====================
+    public bool PrecioIncluyeIva { get; set; } = true; // true = precio CON IVA, false = precio SIN IVA
 
     // ==================== AGREGADORES DE PEDIDO ====================
     public List<AgregadorPedidoDto> AgregadoresPedido { get; set; } = new();
@@ -49,10 +52,10 @@ public class AgregadorPedidoDto
     public string Nombre { get; set; } = string.Empty;
     public int Cantidad { get; set; } = 1;
     public decimal PrecioUnitario { get; set; }
-    public decimal Subtotal { get; set; }
-    public decimal Iva { get; set; }
-    public decimal ValorIva { get; set; }
-    public decimal Total { get; set; }
+    public decimal Subtotal { get; set; }      // Opcional - el sistema lo calcula
+    public decimal Iva { get; set; }           // Opcional - el sistema lo calcula
+    public decimal ValorIva { get; set; }      // Opcional - el sistema lo calcula
+    public decimal Total { get; set; }         // Opcional - el sistema lo calcula
     public bool AfectaBaseImponible { get; set; } = true;
 }
 
@@ -62,11 +65,11 @@ public class FacturaLineaSimpleDto
     public string Codigo { get; set; } = string.Empty;
     public string? Nombre { get; set; }
     public decimal Cantidad { get; set; }
-    public decimal PrecioUnitario { get; set; }
-    public decimal Subtotal { get; set; }
-    public decimal PrecioTotal { get; set; }
-    public decimal Iva { get; set; }
-    public decimal ValorIva { get; set; }
+    public decimal PrecioUnitario { get; set; }  // ← Puede ser CON o SIN IVA según PrecioIncluyeIva
+    public decimal Subtotal { get; set; }        // Opcional - el sistema lo calcula
+    public decimal PrecioTotal { get; set; }     // Opcional - el sistema lo calcula
+    public decimal Iva { get; set; }             // Opcional - el sistema lo calcula
+    public decimal ValorIva { get; set; }        // Opcional - el sistema lo calcula
     public decimal DescuentoPorcentaje { get; set; }
     public decimal DescuentoValor { get; set; }
     public string? DescuentoMotivo { get; set; }
@@ -80,15 +83,15 @@ public class AgregadorProductoDto
     public string Nombre { get; set; } = string.Empty;
     public int Cantidad { get; set; } = 1;
     public decimal PrecioUnitario { get; set; }
-    public decimal Subtotal { get; set; }
-    public decimal Iva { get; set; }
-    public decimal ValorIva { get; set; }
-    public decimal Total { get; set; }
+    public decimal Subtotal { get; set; }        // Opcional - el sistema lo calcula
+    public decimal Iva { get; set; }             // Opcional - el sistema lo calcula
+    public decimal ValorIva { get; set; }        // Opcional - el sistema lo calcula
+    public decimal Total { get; set; }           // Opcional - el sistema lo calcula
     public List<string> ModificadoresTexto { get; set; } = new();
 }
 
 public class FacturaPagoDto
-{    
+{
     public string? IdPago { get; set; }
     public string? Descripcion { get; set; }
 }

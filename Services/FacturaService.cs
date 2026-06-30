@@ -32,8 +32,6 @@ public class FacturaService
             throw new Exception("Tiempo de espera agotado. Intente nuevamente.");
         }
 
-        await semaphore.WaitAsync();
-
         SqlConnection connection = null;
         SqlTransaction transaction = null;
 
@@ -43,17 +41,23 @@ public class FacturaService
             await connection.OpenAsync();
             transaction = (SqlTransaction)await connection.BeginTransactionAsync();
 
-            // Calcular totales si no vienen
+            // 1. Obtener IVA actual
+            decimal ivaActual = await ObtenerPorcentajeIva(sucursalConfig, request.Fecha);
+            request.PorcenIva = ivaActual;
+
+            // 2. Procesar líneas: desglosar IVA si el precio incluye IVA
+            await ProcesarLineasConIva(request, ivaActual);
+
+            // 3. Calcular totales si no vienen
             if (request.ValorTotal == 0)
             {
-                var (totCiva, valorIva, valorTotal, porcenIvaUsado) = await CalcularTotalesAsync(connection, transaction, sucursalConfig, request);
+                var (totCiva, valorIva, valorTotal) = CalcularTotalesDesdeLineas(request);
                 request.TotCiva = totCiva;
                 request.ValorIva = valorIva;
                 request.ValorTotal = valorTotal;
-                request.PorcenIva = porcenIvaUsado;
             }
 
-            // 1. VALIDAR O CREAR CLIENTE
+            // 4. VALIDAR O CREAR CLIENTE
             if (string.IsNullOrEmpty(request.CiRuc))
                 throw new Exception("El campo ciRuc es obligatorio");
 
@@ -61,31 +65,33 @@ public class FacturaService
                 request.CiRuc, request.NombreCliente ?? "", request.Direccion, request.Telefono1, request.CorreoCliente);
             request.CodigoCliente = codigoCliente;
 
-            // 2. GENERAR NUMERO DE FACTURA
+            // 5. GENERAR NUMERO DE FACTURA
             string idLugar = $"{request.Sucursal}{request.NroIdDoc ?? "001-001"}";
             var docNumero = await ObtenerSiguienteNumero(connection, transaction, idLugar);
             var idClaveDoc = await ObtenerSiguienteIdClaveDoc(connection, transaction);
 
-            // 3. INSERTAR CABECERA
+            // 6. INSERTAR CABECERA
             await InsertarCabecera(connection, transaction, request, docNumero, idClaveDoc, empresaId);
 
-            // 4. INSERTAR LINEAS
+            // 7. INSERTAR LINEAS
             await InsertarLineas(connection, transaction, request, docNumero, idClaveDoc, sucursalConfig);
 
-            // 5. INSERTAR PAGOS
+            // 8. INSERTAR PAGOS
             if (request.Pagos != null && request.Pagos.Any())
                 await InsertarPagos(connection, transaction, request, docNumero, idClaveDoc);
 
             await transaction.CommitAsync();
 
             // ==================== IMPRIMIR (FIRE AND FORGET) ====================
-            // La impresión se ejecuta en background sin bloquear la respuesta
             _ = Task.Run(async () =>
             {
                 try
                 {
+                    using var conn = new SqlConnection(sucursalConfig.ConnectionString);
+                    await conn.OpenAsync();
+
                     var (cabecera, lineas, empresa) = await ConsultarFacturaParaImprimir(
-                        connection, idClaveDoc, request.Sucursal, "FAC", docNumero);
+                        conn, idClaveDoc, request.Sucursal, "FAC", docNumero);
 
                     bool impreso = await _impresionService.ImprimirFactura(request.Sucursal, cabecera, lineas, empresa);
 
@@ -121,6 +127,144 @@ public class FacturaService
         return response;
     }
 
+    private async Task ProcesarLineasConIva(FacturaRequestDto request, decimal ivaActual)
+    {
+        bool precioIncluyeIva = request.PrecioIncluyeIva;
+
+        foreach (var linea in request.Lineas)
+        {
+            if (precioIncluyeIva && ivaActual > 0)
+            {
+                // Desglosar IVA del precio enviado (CON IVA)
+                // precioUnitario = art_precvta2_inc (CON IVA)
+                decimal precioSinIva = DesglosarIva(linea.PrecioUnitario, ivaActual);
+                linea.PrecioUnitario = Math.Round(precioSinIva, 4); // Guardar SIN IVA
+                linea.Iva = ivaActual;
+                linea.ValorIva = Math.Round((linea.PrecioUnitario * linea.Cantidad) * (ivaActual / 100), 4);
+                linea.Subtotal = Math.Round(linea.PrecioUnitario * linea.Cantidad, 4);
+                linea.PrecioTotal = Math.Round(linea.Subtotal + linea.ValorIva, 4);
+            }
+
+            // Procesar agregadores de producto
+            foreach (var agg in linea.AgregadoresProducto)
+            {
+                if (precioIncluyeIva && ivaActual > 0)
+                {
+                    decimal precioSinIvaAgg = DesglosarIva(agg.PrecioUnitario, ivaActual);
+                    agg.PrecioUnitario = Math.Round(precioSinIvaAgg, 4);
+                    agg.Iva = ivaActual;
+                    agg.ValorIva = Math.Round((agg.PrecioUnitario * agg.Cantidad) * (ivaActual / 100), 4);
+                    agg.Subtotal = Math.Round(agg.PrecioUnitario * agg.Cantidad, 4);
+                    agg.Total = Math.Round(agg.Subtotal + agg.ValorIva, 4);
+                }
+            }
+        }
+
+        // Procesar agregadores de pedido
+        foreach (var agg in request.AgregadoresPedido)
+        {
+            if (precioIncluyeIva && ivaActual > 0 && agg.AfectaBaseImponible)
+            {
+                decimal precioSinIvaAgg = DesglosarIva(agg.PrecioUnitario, ivaActual);
+                agg.PrecioUnitario = Math.Round(precioSinIvaAgg, 4);
+                agg.Iva = ivaActual;
+                agg.ValorIva = Math.Round((agg.PrecioUnitario * agg.Cantidad) * (ivaActual / 100), 4);
+                agg.Subtotal = Math.Round(agg.PrecioUnitario * agg.Cantidad, 4);
+                agg.Total = Math.Round(agg.Subtotal + agg.ValorIva, 4);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Desglosa el IVA de un precio que incluye IVA
+    /// </summary>
+    private decimal DesglosarIva(decimal precioConIva, decimal ivaPorcentaje)
+    {
+        if (ivaPorcentaje <= 0)
+            return precioConIva;
+
+        decimal precioSinIva = precioConIva / (1 + (ivaPorcentaje / 100));
+        return Math.Round(precioSinIva, 4);
+    }
+
+    private (decimal totCiva, decimal valorIva, decimal valorTotal) CalcularTotalesDesdeLineas(FacturaRequestDto request)
+    {
+        decimal totalBaseIva = 0;
+        decimal totalBaseSinIva = 0;
+        decimal totalIva = 0;
+
+        foreach (var linea in request.Lineas)
+        {
+            decimal subtotal = linea.Subtotal > 0 ? linea.Subtotal : linea.Cantidad * linea.PrecioUnitario;
+
+            // Aplicar descuentos
+            if (linea.DescuentoPorcentaje > 0)
+                subtotal -= subtotal * (linea.DescuentoPorcentaje / 100);
+            else if (linea.DescuentoValor > 0)
+                subtotal -= linea.DescuentoValor;
+
+            if (linea.Iva > 0)
+            {
+                totalBaseIva += subtotal;
+                totalIva += subtotal * (linea.Iva / 100);
+            }
+            else
+            {
+                totalBaseSinIva += subtotal;
+            }
+
+            // Procesar agregadores de producto
+            foreach (var agg in linea.AgregadoresProducto)
+            {
+                decimal subtotalAgg = agg.Subtotal > 0 ? agg.Subtotal : agg.Cantidad * agg.PrecioUnitario;
+
+                if (agg.Iva > 0)
+                {
+                    totalBaseIva += subtotalAgg;
+                    totalIva += subtotalAgg * (agg.Iva / 100);
+                }
+                else
+                {
+                    totalBaseSinIva += subtotalAgg;
+                }
+            }
+        }
+
+        // Procesar agregadores de pedido
+        foreach (var agg in request.AgregadoresPedido)
+        {
+            if (!agg.AfectaBaseImponible)
+                continue;
+
+            decimal subtotal = agg.Subtotal > 0 ? agg.Subtotal : agg.Cantidad * agg.PrecioUnitario;
+
+            if (agg.Iva > 0)
+            {
+                totalBaseIva += subtotal;
+                totalIva += subtotal * (agg.Iva / 100);
+            }
+            else
+            {
+                totalBaseSinIva += subtotal;
+            }
+        }
+
+        decimal totalGeneral = totalBaseIva + totalBaseSinIva + totalIva;
+
+        // Aplicar descuento general
+        if (request.DescuentoPorcentaje > 0)
+        {
+            decimal descuento = totalGeneral * (request.DescuentoPorcentaje / 100);
+            totalGeneral -= descuento;
+        }
+        else if (request.DescuentoValor > 0)
+        {
+            totalGeneral -= request.DescuentoValor;
+        }
+
+        return (Math.Round(totalBaseIva, 2), Math.Round(totalIva, 2), Math.Round(totalGeneral, 2));
+    }
+
     private async Task InsertarLineas(SqlConnection connection, SqlTransaction transaction, FacturaRequestDto request, decimal docNumero, decimal idClaveDoc, SucursalServidor sucursalConfig)
     {
         int anio = DateTime.Now.Year, mes = DateTime.Now.Month, dia = DateTime.Now.Day;
@@ -139,7 +283,9 @@ public class FacturaService
             if (linea.ModificadoresTexto != null && linea.ModificadoresTexto.Any())
                 nombreCompleto += " + " + string.Join(" + ", linea.ModificadoresTexto);
 
-            decimal subtotal = linea.Cantidad * linea.PrecioUnitario;
+            // Usar valores ya calculados o calcular si no existen
+            decimal precioSinIva = linea.PrecioUnitario;
+            decimal subtotal = linea.Subtotal > 0 ? linea.Subtotal : linea.Cantidad * precioSinIva;
 
             decimal descuentoValor = 0;
             if (linea.DescuentoPorcentaje > 0)
@@ -150,13 +296,12 @@ public class FacturaService
             decimal subtotalConDescuento = subtotal - descuentoValor;
 
             decimal ivaPorcentaje = producto.tieneIva ? (producto.porcentajeIva > 0 ? producto.porcentajeIva : ivaGeneral) : 0;
-
-            decimal ivaValor = subtotalConDescuento * (ivaPorcentaje / 100);
-            decimal precioTotal = subtotalConDescuento + ivaValor;
+            decimal ivaValor = linea.ValorIva > 0 ? linea.ValorIva : subtotalConDescuento * (ivaPorcentaje / 100);
+            decimal precioTotal = linea.PrecioTotal > 0 ? linea.PrecioTotal : subtotalConDescuento + ivaValor;
 
             await InsertarTraLinea(connection, transaction, request, docNumero, idClaveDoc,
                 numLinea++, linea.Codigo, nombreCompleto, linea.Cantidad,
-                linea.PrecioUnitario, precioTotal, ivaPorcentaje, ivaValor,
+                precioSinIva, precioTotal, ivaPorcentaje, ivaValor,
                 totalFactura, anio, mes, dia, "A", -1, 1, 0,
                 linea.DescuentoMotivo, linea.DescuentoPorcentaje, descuentoValor);
 
@@ -170,16 +315,16 @@ public class FacturaService
                 if (agg.ModificadoresTexto != null && agg.ModificadoresTexto.Any())
                     nombreAgregador += " + " + string.Join(" + ", agg.ModificadoresTexto);
 
-                decimal subtotalAgg = agg.Cantidad * agg.PrecioUnitario;
+                decimal precioSinIvaAgg = agg.PrecioUnitario;
+                decimal subtotalAgg = agg.Subtotal > 0 ? agg.Subtotal : agg.Cantidad * precioSinIvaAgg;
 
                 decimal ivaPorcentajeAgg = aggProducto.tieneIva ? (aggProducto.porcentajeIva > 0 ? aggProducto.porcentajeIva : ivaGeneral) : 0;
-
-                decimal ivaValorAgg = subtotalAgg * (ivaPorcentajeAgg / 100);
-                decimal precioTotalAgg = subtotalAgg + ivaValorAgg;
+                decimal ivaValorAgg = agg.ValorIva > 0 ? agg.ValorIva : subtotalAgg * (ivaPorcentajeAgg / 100);
+                decimal precioTotalAgg = agg.Total > 0 ? agg.Total : subtotalAgg + ivaValorAgg;
 
                 await InsertarTraLinea(connection, transaction, request, docNumero, idClaveDoc,
                     numLinea++, agg.Codigo, nombreAgregador, agg.Cantidad,
-                    agg.PrecioUnitario, precioTotalAgg, ivaPorcentajeAgg, ivaValorAgg,
+                    precioSinIvaAgg, precioTotalAgg, ivaPorcentajeAgg, ivaValorAgg,
                     totalFactura, anio, mes, dia, "A", -1, 1, 0,
                     null, 0, 0);
             }
@@ -191,7 +336,8 @@ public class FacturaService
             string quetipo = servicio.existe ? "S" : "A";
             int inventario = servicio.existe ? 0 : -1;
 
-            decimal subtotal = agg.Cantidad * agg.PrecioUnitario;
+            decimal precioSinIvaAgg = agg.PrecioUnitario;
+            decimal subtotalAgg = agg.Subtotal > 0 ? agg.Subtotal : agg.Cantidad * precioSinIvaAgg;
 
             decimal ivaPorcentaje = 0;
             if (servicio.existe && servicio.tieneIva)
@@ -199,17 +345,17 @@ public class FacturaService
             else if (!servicio.existe && agg.Iva > 0)
                 ivaPorcentaje = agg.Iva;
 
-            decimal ivaValor = subtotal * (ivaPorcentaje / 100);
-            decimal total = subtotal + ivaValor;
+            decimal ivaValor = agg.ValorIva > 0 ? agg.ValorIva : subtotalAgg * (ivaPorcentaje / 100);
+            decimal total = agg.Total > 0 ? agg.Total : subtotalAgg + ivaValor;
             string nombre = servicio.existe ? servicio.nombre : agg.Nombre;
 
             await InsertarTraLinea(connection, transaction, request, docNumero, idClaveDoc,
-                numLinea++, agg.Codigo, nombre, agg.Cantidad, agg.PrecioUnitario, total,
+                numLinea++, agg.Codigo, nombre, agg.Cantidad, precioSinIvaAgg, total,
                 ivaPorcentaje, ivaValor, totalFactura, anio, mes, dia,
                 quetipo, inventario, 1, 0, null, 0, 0);
         }
     }
-
+        
     private async Task InsertarTraLinea(SqlConnection connection, SqlTransaction transaction, FacturaRequestDto request, decimal docNumero, decimal idClaveDoc, int numLinea, string codigo, string nombre, decimal cantidad, decimal precioUnitario, decimal precioTotal, decimal ivaPorcentaje, decimal ivaValor, decimal totalFactura, int anio, int mes, int dia, string quetipo, int inventario, int ventas, int compras, string descuentoMotivo, decimal descuentoPorcentaje, decimal descuentoValor)
     {
         decimal traPrectot = Math.Round(cantidad * precioUnitario, 4);
